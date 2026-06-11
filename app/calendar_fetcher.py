@@ -1,12 +1,12 @@
-"""جمع‌آوری تقویم اقتصادی از Finnhub و upsert در دیتابیس.
+"""جمع‌آوری داده‌های اقتصادی از Alpha Vantage (رایگان) و upsert در دیتابیس.
 
-نکته حیاتی: ستون actual_recorded_at لحظه دیدنِ عدد توسط ماست.
-اختلاف آن با release_time = تأخیر فید. اگر این تأخیر بالای ~۵ ثانیه باشد،
-باید منبع داده را عوض کنی، چون Surprise Index لحظه‌ای بی‌ارزش می‌شود.
+Alpha Vantage برخلاف Finnhub تقویم آینده ندارد — سری زمانی تاریخی می‌دهد.
+برای هر شاخص، جدیدترین مقدار را پیدا می‌کنیم؛ اگر در DB نبود یا تازه‌تر بود
+به‌عنوان یک «انتشار» ثبت می‌کنیم.  forecast=NULL است چون AV آن را نمی‌دهد.
 """
 import os
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 
@@ -14,38 +14,70 @@ from db import db
 
 log = logging.getLogger("calendar")
 
-FINNHUB_KEY = os.environ["FINNHUB_API_KEY"]
-CALENDAR_URL = "https://finnhub.io/api/v1/calendar/economic"
+AV_KEY = os.environ.get("AV_API_KEY") or os.environ.get("FINNHUB_API_KEY", "demo")
+AV_BASE = "https://www.alphavantage.co/query"
 
-# نگاشت رویدادهای Finnhub به event_code داخلی ما.
-# فقط رویدادهایی که اینجا تعریف شده‌اند وارد سیستم می‌شوند (فیلتر نویز).
-EVENT_MAP = {
-    ("US", "CPI YoY"):                    "US_CPI_YOY",
-    ("US", "Core CPI YoY"):               "US_CORE_CPI_YOY",
-    ("US", "Nonfarm Payrolls"):           "US_NFP",
-    ("US", "Unemployment Rate"):          "US_UNEMPLOYMENT",
-    ("US", "Average Hourly Earnings MoM"): "US_AHE_MOM",
-    ("US", "GDP Growth Rate QoQ Adv"):    "US_GDP_QOQ_ADV",
-    ("US", "Core PCE Price Index YoY"):   "US_CORE_PCE_YOY",
-    ("US", "Initial Jobless Claims"):     "US_JOBLESS_CLAIMS",
-    ("US", "Retail Sales MoM"):           "US_RETAIL_MOM",
-    ("US", "ISM Manufacturing PMI"):      "US_ISM_MFG",
-    ("EU", "Inflation Rate YoY Flash"):   "EU_CPI_FLASH_YOY",
-    ("GB", "Inflation Rate YoY"):         "GB_CPI_YOY",
+# نگاشت event_code → (AV function, interval)
+AV_MAP: dict[str, tuple[str, str]] = {
+    "US_NFP":          ("NONFARM_PAYROLL", "monthly"),
+    "US_CPI_YOY":      ("CPI",             "monthly"),
+    "US_GDP_QOQ_ADV":  ("REAL_GDP",        "quarterly"),
+    "US_UNEMPLOYMENT": ("UNEMPLOYMENT",    "monthly"),
+    "US_RETAIL_MOM":   ("RETAIL_SALES",    "monthly"),
 }
 
 
-def fetch_window(days_back: int = 2, days_fwd: int = 14) -> list[dict]:
-    """بازه‌ای از تقویم را می‌گیرد: گذشته نزدیک (برای گرفتن actual) + آینده."""
-    now = datetime.now(timezone.utc)
-    params = {
-        "from": (now - timedelta(days=days_back)).strftime("%Y-%m-%d"),
-        "to": (now + timedelta(days=days_fwd)).strftime("%Y-%m-%d"),
-        "token": FINNHUB_KEY,
-    }
-    r = httpx.get(CALENDAR_URL, params=params, timeout=15)
+def _fetch_av(function: str, interval: str | None = None) -> list[dict]:
+    """یک تابع AV را می‌گیرد و سری زمانی را برمی‌گرداند."""
+    params: dict = {"function": function, "apikey": AV_KEY}
+    if interval:
+        params["interval"] = interval
+    r = httpx.get(AV_BASE, params=params, timeout=20)
     r.raise_for_status()
-    return r.json().get("economicCalendar", [])
+    data = r.json()
+    # پاسخ AV معمولاً {"data": [{"date":..., "value":...}, ...]}
+    return data.get("data", [])
+
+
+def fetch_window(days_back: int = 2, days_fwd: int = 14) -> list[dict]:
+    """برای سازگاری با main.py همان امضا را نگه می‌داریم.
+    به جای تقویم آینده، جدیدترین داده‌های موجود را برمی‌گردانیم."""
+    rows: list[dict] = []
+    for event_code, (av_func, interval) in AV_MAP.items():
+        try:
+            series = _fetch_av(av_func, interval)
+            if not series:
+                continue
+            # اولین (جدیدترین) مقدار
+            latest = series[0]
+            previous = series[1] if len(series) > 1 else {}
+            date_str = latest.get("date", "")
+            if not date_str:
+                continue
+            # AV تاریخ می‌دهد نه timestamp؛ ساعت ۱۳:۳۰ UTC (زمان معمول اعلام آمریکایی)
+            release_dt = datetime.fromisoformat(date_str + "T13:30:00").replace(
+                tzinfo=timezone.utc
+            )
+            try:
+                actual_val = float(latest["value"])
+            except (KeyError, ValueError, TypeError):
+                actual_val = None
+            try:
+                prev_val = float(previous.get("value", ""))
+            except (ValueError, TypeError):
+                prev_val = None
+
+            rows.append({
+                "_event_code": event_code,
+                "time": release_dt.isoformat(),
+                "actual": actual_val,
+                "prev": prev_val,
+                "estimate": None,   # AV اعداد پیش‌بینی ندارد
+            })
+            log.debug("%s → %s actual=%s", event_code, date_str, actual_val)
+        except Exception as exc:
+            log.warning("AV fetch failed for %s: %s", event_code, exc)
+    return rows
 
 
 def upsert(rows: list[dict]) -> list[tuple[str, datetime]]:
@@ -56,12 +88,12 @@ def upsert(rows: list[dict]) -> list[tuple[str, datetime]]:
 
     with db() as conn:
         for row in rows:
-            code = EVENT_MAP.get((row.get("country"), row.get("event")))
-            if code is None:
+            code = row.get("_event_code")
+            if not code:
                 continue
-            t = datetime.fromisoformat(row["time"].replace(" ", "T")).replace(
-                tzinfo=timezone.utc
-            )
+            t = datetime.fromisoformat(row["time"])
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
             cur = conn.execute(
                 """
                 INSERT INTO releases
@@ -93,13 +125,7 @@ def upsert(rows: list[dict]) -> list[tuple[str, datetime]]:
 
 
 def polling_interval_seconds() -> int:
-    """polling تطبیقی: نزدیک رویداد مهم، سرعت بالا می‌رود."""
-    with db() as conn:
-        cur = conn.execute(
-            """SELECT MIN(release_time) FROM upcoming_high_impact
-               WHERE release_time < now() + INTERVAL '10 minutes'"""
-        )
-        soon = cur.fetchone()[0]
-    if soon is not None:
-        return 2      # پنجره داغ: هر ۲ ثانیه
-    return 60         # حالت عادی: هر دقیقه
+    """Alpha Vantage رایگان ۲۵ درخواست/روز دارد (AV_MAP داریم ۵ شاخص).
+    هر ۲ ساعت یک‌بار کافی است — ۱۲ بار × ۵ شاخص = ۶۰ درخواست/روز
+    اگر پلن رایگان standard (500/day) دارید همین کافی است."""
+    return 7_200   # هر ۲ ساعت

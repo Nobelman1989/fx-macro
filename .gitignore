@@ -1,0 +1,19 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# env & secrets
+.env
+.env.local
+
+# historical price data (large; loaded via load_history.py)
+*.csv
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

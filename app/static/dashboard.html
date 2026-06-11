@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>fx-macro — داشبورد کلان</title>
+  <style>
+    :root {
+      --bg: #0b1020; --card: #141b2e; --card2: #1b2540; --line: #263150;
+      --txt: #e7ecf6; --muted: #93a0bd; --accent: #5b8cff;
+      --hawk: #ff5d6c; --dove: #34d399; --warn: #f5b942; --ok: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--txt);
+      font-family: "Segoe UI", Tahoma, "Vazirmatn", system-ui, sans-serif;
+      font-size: 14px; line-height: 1.6;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #101830, #0b1020);
+      position: sticky; top: 0; z-index: 10;
+    }
+    header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+    header .sub { color: var(--muted); font-size: 12px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px; font-size: 12px;
+      background: var(--card2); border: 1px solid var(--line);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.ok { background: var(--ok); } .dot.bad { background: var(--hawk); }
+    main {
+      display: grid; gap: 16px; padding: 20px 24px;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      max-width: 1500px; margin: 0 auto;
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 14px; padding: 16px 18px; overflow: hidden;
+    }
+    .card h2 {
+      font-size: 14px; margin: 0 0 12px; display: flex;
+      align-items: center; justify-content: space-between; color: var(--txt);
+    }
+    .card h2 .badge { color: var(--muted); font-weight: 400; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 7px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; }
+    td.num { font-variant-numeric: tabular-nums; }
+    tr:last-child td { border-bottom: none; }
+    .imp { font-size: 11px; padding: 2px 7px; border-radius: 6px; }
+    .imp3 { background: rgba(255,93,108,.15); color: var(--hawk); }
+    .imp2 { background: rgba(245,185,66,.15); color: var(--warn); }
+    .imp1 { background: rgba(147,160,189,.15); color: var(--muted); }
+    .z-pos { color: var(--hawk); } .z-neg { color: var(--dove); }
+    .muted { color: var(--muted); }
+    .empty { color: var(--muted); text-align: center; padding: 18px; font-size: 13px; }
+    .err { color: var(--hawk); text-align: center; padding: 14px; font-size: 13px; }
+    /* CB tone gauges */
+    .cb-row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .cb { flex: 1 1 180px; background: var(--card2); border: 1px solid var(--line);
+          border-radius: 12px; padding: 14px; }
+    .cb .name { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+    .gauge { height: 8px; border-radius: 999px; position: relative;
+             background: linear-gradient(90deg, var(--dove), #93a0bd 50%, var(--hawk)); }
+    .gauge .mark { position: absolute; top: -3px; width: 14px; height: 14px;
+                   border-radius: 50%; background: #fff; border: 2px solid #0b1020;
+                   transform: translateX(50%); transition: right .4s ease; }
+    .gscale { display: flex; justify-content: space-between; font-size: 10px;
+              color: var(--muted); margin-top: 5px; }
+    .tone-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tone-sum { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .tone-diff { font-size: 12px; margin-top: 8px; padding-top: 8px;
+                 border-top: 1px dashed var(--line); }
+    footer { color: var(--muted); text-align: center; padding: 18px; font-size: 12px; }
+    a { color: var(--accent); text-decoration: none; }
+    .refresh { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>fx-macro · داشبورد کلان فارکس</h1>
+      <div class="sub">Surprise Index · واکنش تاریخی · لحن بانک مرکزی</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span class="pill refresh" id="health" title="کلیک = تازه‌سازی">
+        <span class="dot" id="health-dot"></span><span id="health-txt">…</span>
+      </span>
+      <span class="pill"><span class="muted">به‌روزرسانی خودکار هر ۶۰ث</span></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- تقویم پیشِ‌رو -->
+    <section class="card">
+      <h2>رویدادهای مهم ۴۸ ساعت آینده <span class="badge" id="cal-n"></span></h2>
+      <div id="cal"><div class="empty">در حال بارگذاری…</div></div>
+    </section>
+
+    <!-- آخرین انتشارها + سورپرایز -->
+    <section class="card">
+      <h2>آخرین انتشارها · Surprise Index <span class="badge" id="rel-n"></span></h2>
+      <div id="rel"><div class="empty">در حال بارگذاری…</div></div>
+    </section>
+
+    <!-- لحن بانک مرکزی -->
+    <section class="card" style="grid-column: 1 / -1">
+      <h2>لحن بانک مرکزی (هاوکیش ↔ داویش)</h2>
+      <div class="cb-row" id="cb"><div class="empty">در حال بارگذاری…</div></div>
+    </section>
+
+    <!-- تأخیر فید -->
+    <section class="card">
+      <h2>تأخیر فید داده <span class="badge">میانه‌ی ثانیه</span></h2>
+      <div id="lat"><div class="empty">در حال بارگذاری…</div></div>
+    </section>
+
+    <!-- کاتالوگ شاخص‌ها -->
+    <section class="card">
+      <h2>کاتالوگ شاخص‌ها <span class="badge" id="ev-n"></span></h2>
+      <div id="ev"><div class="empty">در حال بارگذاری…</div></div>
+    </section>
+  </main>
+
+  <footer>
+    fx-macro API · <a href="/docs">مستندات تعاملی /docs</a> ·
+    خروجی تحلیل آماری گذشته است، نه سیگنال خرید/فروش.
+  </footer>
+
+  <script>
+    const fmtDate = (s) => {
+      if (!s) return "—";
+      const d = new Date(s);
+      if (isNaN(d)) return s;
+      return d.toLocaleString("fa-IR", {
+        month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+      });
+    };
+    const num = (v, dp = 2) =>
+      v === null || v === undefined || v === "" ? "—" : Number(v).toFixed(dp);
+    const esc = (s) =>
+      String(s ?? "").replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+    async function getJSON(url) {
+      const r = await fetch(url, { headers: { accept: "application/json" } });
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    }
+    function fail(id, e) {
+      document.getElementById(id).innerHTML =
+        `<div class="err">خطا در بارگذاری (${esc(e.message || e)})</div>`;
+    }
+
+    async function loadHealth() {
+      const dot = document.getElementById("health-dot");
+      const txt = document.getElementById("health-txt");
+      try {
+        const h = await getJSON("/health");
+        dot.className = "dot ok";
+        txt.textContent = `سرویس آنلاین · DB ${h.db}`;
+      } catch (e) {
+        dot.className = "dot bad";
+        txt.textContent = "سرویس/DB در دسترس نیست";
+      }
+    }
+
+    async function loadCalendar() {
+      try {
+        const rows = await getJSON("/calendar/upcoming");
+        document.getElementById("cal-n").textContent = rows.length ? `${rows.length} رویداد` : "";
+        if (!rows.length) {
+          document.getElementById("cal").innerHTML =
+            `<div class="empty">رویداد مهمی در ۴۸ ساعت آینده ثبت نشده.</div>`;
+          return;
+        }
+        const body = rows.map((r) => `
+          <tr>
+            <td>${esc(r.title)}</td>
+            <td><span class="muted">${esc(r.currency)}</span></td>
+            <td><span class="imp imp${r.importance}">${"★".repeat(r.importance)}</span></td>
+            <td class="num">${num(r.forecast)}</td>
+            <td class="num muted">${num(r.previous)}</td>
+            <td class="num muted">${fmtDate(r.release_time)}</td>
+          </tr>`).join("");
+        document.getElementById("cal").innerHTML = `
+          <table><thead><tr>
+            <th>شاخص</th><th>ارز</th><th>اهمیت</th>
+            <th>پیش‌بینی</th><th>قبلی</th><th>زمان</th>
+          </tr></thead><tbody>${body}</tbody></table>`;
+      } catch (e) { fail("cal", e); }
+    }
+
+    async function loadReleases() {
+      try {
+        const rows = await getJSON("/releases/recent?limit=12");
+        document.getElementById("rel-n").textContent = rows.length ? `${rows.length} انتشار` : "";
+        if (!rows.length) {
+          document.getElementById("rel").innerHTML =
+            `<div class="empty">هنوز انتشاری با عدد actual ثبت نشده. اول main.py را اجرا کن.</div>`;
+          return;
+        }
+        const body = rows.map((r) => {
+          const z = r.surprise_z;
+          const zc = z == null ? "" : z >= 0 ? "z-pos" : "z-neg";
+          const zt = z == null ? "—" : (z >= 0 ? "+" : "") + Number(z).toFixed(2) + "σ";
+          return `<tr>
+            <td>${esc(r.event_code)}</td>
+            <td class="num">${num(r.actual)}</td>
+            <td class="num muted">${num(r.forecast)}</td>
+            <td class="num ${zc}">${zt}</td>
+            <td class="num muted">${fmtDate(r.release_time)}</td>
+          </tr>`;
+        }).join("");
+        document.getElementById("rel").innerHTML = `
+          <table><thead><tr>
+            <th>شاخص</th><th>actual</th><th>پیش‌بینی</th>
+            <th>سورپرایز (z)</th><th>زمان</th>
+          </tr></thead><tbody>${body}</tbody></table>`;
+      } catch (e) { fail("rel", e); }
+    }
+
+    function cbCard(bank, d) {
+      if (!d) {
+        return `<div class="cb"><div class="name">${bank}</div>
+          <div class="empty">بیانیه‌ای ثبت نشده.<br>
+          <span class="muted">python cb_tone.py ${bank} &lt;url&gt;</span></div></div>`;
+      }
+      const t = d.tone_score;
+      const pct = t == null ? 50 : ((Number(t) + 1) / 2) * 100; // -1..+1 → 0..100%
+      const label = t == null ? "نامشخص" : t > 0.15 ? "هاوکیش" : t < -0.15 ? "داویش" : "خنثی";
+      const color = t == null ? "var(--muted)" : t > 0.15 ? "var(--hawk)" : t < -0.15 ? "var(--dove)" : "var(--muted)";
+      return `<div class="cb">
+        <div class="name">${bank} <span class="muted" style="font-weight:400">· ${esc(d.doc_type || "")} · ${fmtDate(d.published_at)}</span></div>
+        <div class="tone-val" style="color:${color}">${t == null ? "—" : (t > 0 ? "+" : "") + Number(t).toFixed(2)}
+          <span style="font-size:13px;color:${color}">${label}</span></div>
+        <div class="gauge"><div class="mark" style="right:${pct}%"></div></div>
+        <div class="gscale"><span>داویش −۱</span><span>۰</span><span>+۱ هاوکیش</span></div>
+        ${d.tone_summary ? `<div class="tone-sum">${esc(d.tone_summary)}</div>` : ""}
+        ${d.diff_vs_prev ? `<div class="tone-diff"><span class="muted">تغییر نسبت به قبل: </span>${esc(d.diff_vs_prev)}</div>` : ""}
+        ${d.source_url ? `<div style="margin-top:8px"><a href="${esc(d.source_url)}" target="_blank" rel="noopener">منبع ↗</a></div>` : ""}
+      </div>`;
+    }
+
+    async function loadCB() {
+      const banks = ["FED", "ECB"];
+      try {
+        const results = await Promise.all(banks.map(async (b) => {
+          try { return [b, await getJSON(`/cb/latest?central_bank=${b}`)]; }
+          catch { return [b, null]; } // 404 = هنوز بیانیه‌ای نیست
+        }));
+        document.getElementById("cb").innerHTML =
+          results.map(([b, d]) => cbCard(b, d)).join("");
+      } catch (e) { fail("cb", e); }
+    }
+
+    async function loadLatency() {
+      try {
+        const rows = await getJSON("/feed-latency");
+        if (!rows.length) {
+          document.getElementById("lat").innerHTML =
+            `<div class="empty">هنوز داده‌ی تأخیری نیست.</div>`;
+          return;
+        }
+        const body = rows.map((r) => {
+          const v = r.median_latency_sec;
+          const warn = v != null && v > 5 ? "z-pos" : "";
+          return `<tr>
+            <td>${esc(r.event_code)}</td>
+            <td class="num ${warn}">${v == null ? "—" : v.toFixed(1)} ث</td>
+            <td class="num muted">${r.samples}</td>
+          </tr>`;
+        }).join("");
+        document.getElementById("lat").innerHTML = `
+          <table><thead><tr><th>شاخص</th><th>میانه تأخیر</th><th>نمونه‌ها</th></tr></thead>
+          <tbody>${body}</tbody></table>
+          <div class="muted" style="font-size:11px;margin-top:8px">
+            تأخیر بالای ~۵ث یعنی منبع داده باید سریع‌تر شود.</div>`;
+      } catch (e) { fail("lat", e); }
+    }
+
+    async function loadEvents() {
+      try {
+        const rows = await getJSON("/events");
+        document.getElementById("ev-n").textContent = rows.length ? `${rows.length} شاخص` : "";
+        const body = rows.map((r) => `
+          <tr>
+            <td>${esc(r.event_code)}</td>
+            <td>${esc(r.title)}</td>
+            <td><span class="muted">${esc(r.currency)}</span></td>
+            <td><span class="imp imp${r.importance}">${"★".repeat(r.importance)}</span></td>
+            <td class="muted">${r.higher_is_hawkish ? "↑ هاوکیش" : "↑ داویش"}</td>
+          </tr>`).join("");
+        document.getElementById("ev").innerHTML = `
+          <table><thead><tr>
+            <th>کد</th><th>عنوان</th><th>ارز</th><th>اهمیت</th><th>جهت</th>
+          </tr></thead><tbody>${body}</tbody></table>`;
+      } catch (e) { fail("ev", e); }
+    }
+
+    function loadAll() {
+      loadHealth(); loadCalendar(); loadReleases();
+      loadCB(); loadLatency(); loadEvents();
+    }
+    document.getElementById("health").addEventListener("click", loadAll);
+    loadAll();
+    setInterval(loadAll, 60000);
+  </script>
+</body>
+</html>

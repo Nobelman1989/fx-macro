@@ -1,0 +1,11 @@
+# fx-macro dependencies
+httpx>=0.27
+psycopg[binary]>=3.1
+psycopg-pool>=3.2
+
+# web API layer (api.py)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# central-bank tone engine (cb_tone.py): HTML parsing of Fed/ECB statements
+beautifulsoup4>=4.12

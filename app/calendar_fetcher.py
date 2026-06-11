@@ -124,6 +124,62 @@ def upsert(rows: list[dict]) -> list[tuple[str, datetime]]:
     return fresh
 
 
+def _next_release_date(event_code: str, last_date: datetime, interval: str) -> datetime:
+    """تاریخ تقریبی انتشار بعدی را محاسبه می‌کند."""
+    from calendar import monthrange
+
+    if event_code in ("US_NFP", "US_UNEMPLOYMENT"):
+        # NFP و بیکاری: اولین جمعه‌ی ماه بعد، ۱۳:۳۰ UTC
+        year = last_date.year + (last_date.month // 12)
+        month = (last_date.month % 12) + 1
+        first = datetime(year, month, 1, 13, 30, tzinfo=timezone.utc)
+        days_ahead = (4 - first.weekday()) % 7   # جمعه = weekday 4
+        return first + timedelta(days=days_ahead)
+
+    if interval == "quarterly":
+        # GDP تقریباً ۹۰ روز بعد
+        return last_date + timedelta(days=90)
+
+    # ماهانه: تقریباً ۳۵ روز بعد (برای جلوگیری از افتادن در همان ماه)
+    year = last_date.year + (last_date.month // 12)
+    month = (last_date.month % 12) + 1
+    day = min(last_date.day, monthrange(year, month)[1])
+    return last_date.replace(year=year, month=month, day=day)
+
+
+def schedule_upcoming() -> None:
+    """برای هر شاخص، یک ردیف پیش‌بینی‌شده (actual=NULL) در releases می‌گذارد
+    تا نمای تقویم آینده چیزی برای نمایش داشته باشد."""
+    with db() as conn:
+        for event_code, (_, interval) in AV_MAP.items():
+            # آخرین actual را از DB می‌گیریم
+            cur = conn.execute(
+                """SELECT release_time, actual FROM releases
+                   WHERE event_code = %s AND actual IS NOT NULL
+                   ORDER BY release_time DESC LIMIT 1""",
+                (event_code,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                continue
+            last_dt, last_actual = row
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+
+            next_dt = _next_release_date(event_code, last_dt, interval)
+            if next_dt <= datetime.now(timezone.utc):
+                continue   # تاریخ گذشته است، رد کن
+
+            # فقط اگر هنوز ثبت نشده
+            conn.execute(
+                """INSERT INTO releases (event_code, release_time, previous)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (event_code, release_time) DO NOTHING""",
+                (event_code, next_dt, last_actual),
+            )
+            log.debug("upcoming scheduled: %s @ %s", event_code, next_dt.date())
+
+
 def polling_interval_seconds() -> int:
     """Alpha Vantage رایگان ۲۵ درخواست/روز دارد (AV_MAP داریم ۵ شاخص).
     هر ۲ ساعت یک‌بار کافی است — ۱۲ بار × ۵ شاخص = ۶۰ درخواست/روز

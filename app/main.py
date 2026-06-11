@@ -36,6 +36,7 @@ PRIMARY_PAIR = {
 def tick() -> None:
     rows = cal.fetch_window()
     fresh = cal.upsert(rows)
+    cal.schedule_upcoming()   # پیش‌بینی تاریخ انتشار بعدی هر شاخص
 
     alerts.send_pre_event_alerts()
 

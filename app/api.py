@@ -68,13 +68,19 @@ def events() -> list[dict]:
 
 
 @app.get("/calendar/upcoming")
-def calendar_upcoming() -> list[dict]:
-    """رویدادهای مهمِ پیشِ‌رو (نمای upcoming_high_impact: ۴۸ ساعت آینده، اهمیت ۲+)."""
+def calendar_upcoming(days: int = Query(30, ge=1, le=90)) -> list[dict]:
+    """رویدادهای پیشِ‌رو — پیش‌فرض ۳۰ روز آینده، اهمیت ۲+."""
     with db() as conn:
         cur = conn.execute(
-            """SELECT event_code, title, currency, importance,
-                      release_time, previous, forecast
-               FROM upcoming_high_impact"""
+            """SELECT r.event_code, e.title, e.currency, e.importance,
+                      r.release_time, r.previous, r.forecast
+               FROM releases r
+               JOIN economic_events e USING (event_code)
+               WHERE r.actual IS NULL
+                 AND r.release_time BETWEEN now() AND now() + (%s || ' days')::INTERVAL
+                 AND e.importance >= 2
+               ORDER BY r.release_time""",
+            (days,),
         )
         return _rows_as_dicts(cur)
 
